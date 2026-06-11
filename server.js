@@ -10,6 +10,25 @@ const PORT = process.env.PORT || 3000;
 const DATA_DIR = path.join(__dirname, 'data');
 const DATASETS_FILE = path.join(DATA_DIR, 'datasets.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const BATCHES_FILE = path.join(DATA_DIR, 'batches.json');
+
+const BATCH_STATES = {
+  DRAFT: 'draft',
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  RETURNED: 'returned',
+  VOIDED: 'voided',
+  ARCHIVED: 'archived'
+};
+
+const VALID_TRANSITIONS = {
+  [BATCH_STATES.DRAFT]: [BATCH_STATES.PENDING],
+  [BATCH_STATES.PENDING]: [BATCH_STATES.APPROVED, BATCH_STATES.RETURNED, BATCH_STATES.VOIDED],
+  [BATCH_STATES.RETURNED]: [BATCH_STATES.DRAFT],
+  [BATCH_STATES.APPROVED]: [BATCH_STATES.ARCHIVED],
+  [BATCH_STATES.VOIDED]: [],
+  [BATCH_STATES.ARCHIVED]: []
+};
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -24,6 +43,9 @@ function ensureDataFiles() {
   }
   if (!fs.existsSync(HISTORY_FILE)) {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2));
+  }
+  if (!fs.existsSync(BATCHES_FILE)) {
+    fs.writeFileSync(BATCHES_FILE, JSON.stringify([], null, 2));
   }
 }
 ensureDataFiles();
@@ -318,6 +340,334 @@ app.delete('/api/history/:id', (req, res) => {
   }
   writeJsonFile(HISTORY_FILE, history);
   res.json({ success: true });
+});
+
+function readBatches() {
+  return readJsonFile(BATCHES_FILE);
+}
+
+function writeBatches(batches) {
+  writeJsonFile(BATCHES_FILE, batches);
+}
+
+function isValidTransition(currentState, nextState) {
+  const allowed = VALID_TRANSITIONS[currentState];
+  return allowed && allowed.includes(nextState);
+}
+
+app.get('/api/batches', (req, res) => {
+  const { state } = req.query;
+  let batches = readBatches();
+  if (state) {
+    batches = batches.filter(b => b.state === state);
+  }
+  const summaries = batches.map(b => ({
+    id: b.id,
+    batchNo: b.batchNo,
+    title: b.title,
+    state: b.state,
+    datasetName: b.fitResult?.datasetName,
+    modelType: b.fitResult?.modelType,
+    rSquared: b.fitResult?.metrics?.rSquared,
+    submitter: b.submitter,
+    reviewer: b.reviewer,
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt,
+    submittedAt: b.submittedAt,
+    reviewedAt: b.reviewedAt,
+    archivedAt: b.archivedAt
+  }));
+  res.json(summaries);
+});
+
+app.get('/api/batches/:id', (req, res) => {
+  const { id } = req.params;
+  const batches = readBatches();
+  const batch = batches.find(b => b.id === id);
+  if (!batch) {
+    return res.status(404).json({ error: '批次不存在' });
+  }
+  res.json(batch);
+});
+
+app.post('/api/batches', (req, res) => {
+  const { title, submitter, fitResultId } = req.body;
+  if (!title) {
+    return res.status(400).json({ error: '请输入批次标题' });
+  }
+  if (!fitResultId) {
+    return res.status(400).json({ error: '请先执行拟合并选择拟合结果' });
+  }
+
+  const history = readJsonFile(HISTORY_FILE);
+  const fitResult = history.find(h => h.id === fitResultId);
+  if (!fitResult) {
+    return res.status(404).json({ error: '拟合结果不存在' });
+  }
+
+  const batches = readBatches();
+  const now = new Date().toISOString();
+  const batchNo = 'BATCH-' + new Date().getFullYear() + '-' + String(batches.length + 1).padStart(5, '0');
+
+  const batch = {
+    id: generateId(),
+    batchNo,
+    title,
+    state: BATCH_STATES.DRAFT,
+    submitter: submitter || '未指定提交人',
+    reviewer: null,
+    fitResultId,
+    fitResult: {
+      id: fitResult.id,
+      datasetId: fitResult.datasetId,
+      datasetName: fitResult.datasetName,
+      modelType: fitResult.modelType,
+      modelEquation: fitResult.modelEquation,
+      params: fitResult.params,
+      metrics: fitResult.metrics,
+      points: fitResult.points,
+      curvePoints: fitResult.curvePoints,
+      residuals: fitResult.residuals,
+      outliers: fitResult.outliers
+    },
+    stateHistory: [
+      {
+        state: BATCH_STATES.DRAFT,
+        timestamp: now,
+        operator: submitter || '未指定提交人',
+        comment: '创建批次草稿'
+      }
+    ],
+    reviewOpinion: null,
+    modificationNotes: [],
+    createdAt: now,
+    updatedAt: now,
+    submittedAt: null,
+    reviewedAt: null,
+    archivedAt: null
+  };
+
+  batches.unshift(batch);
+  writeBatches(batches);
+  res.json(batch);
+});
+
+app.post('/api/batches/:id/submit', (req, res) => {
+  const { id } = req.params;
+  const { submitter } = req.body;
+  const batches = readBatches();
+  const index = batches.findIndex(b => b.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: '批次不存在' });
+  }
+  const batch = batches[index];
+  if (!isValidTransition(batch.state, BATCH_STATES.PENDING)) {
+    return res.status(400).json({ error: `当前状态「${batch.state}」不允许提交复核` });
+  }
+
+  const now = new Date().toISOString();
+  const oldState = batch.state;
+  batch.state = BATCH_STATES.PENDING;
+  batch.submitter = submitter || batch.submitter;
+  batch.submittedAt = now;
+  batch.updatedAt = now;
+  batch.stateHistory.push({
+    state: BATCH_STATES.PENDING,
+    fromState: oldState,
+    timestamp: now,
+    operator: batch.submitter,
+    comment: '提交复核'
+  });
+
+  batches[index] = batch;
+  writeBatches(batches);
+  res.json(batch);
+});
+
+app.post('/api/batches/:id/review', (req, res) => {
+  const { id } = req.params;
+  const { decision, reviewer, comment } = req.body;
+  const decisions = [BATCH_STATES.APPROVED, BATCH_STATES.RETURNED, BATCH_STATES.VOIDED];
+  if (!decisions.includes(decision)) {
+    return res.status(400).json({ error: '无效的复核决定' });
+  }
+  if (!reviewer) {
+    return res.status(400).json({ error: '请填写复核人' });
+  }
+
+  const batches = readBatches();
+  const index = batches.findIndex(b => b.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: '批次不存在' });
+  }
+  const batch = batches[index];
+  if (!isValidTransition(batch.state, decision)) {
+    return res.status(400).json({ error: `当前状态「${batch.state}」不允许执行此操作` });
+  }
+
+  const now = new Date().toISOString();
+  const oldState = batch.state;
+  batch.state = decision;
+  batch.reviewer = reviewer;
+  batch.reviewedAt = now;
+  batch.updatedAt = now;
+  batch.reviewOpinion = {
+    decision,
+    reviewer,
+    comment: comment || '',
+    timestamp: now
+  };
+
+  const decisionLabels = {
+    [BATCH_STATES.APPROVED]: '复核通过',
+    [BATCH_STATES.RETURNED]: '退回修改',
+    [BATCH_STATES.VOIDED]: '作废处理'
+  };
+
+  batch.stateHistory.push({
+    state: decision,
+    fromState: oldState,
+    timestamp: now,
+    operator: reviewer,
+    comment: `${decisionLabels[decision]}：${comment || '无意见'}`
+  });
+
+  batches[index] = batch;
+  writeBatches(batches);
+  res.json(batch);
+});
+
+app.post('/api/batches/:id/refit', (req, res) => {
+  const { id } = req.params;
+  const { modificationNote, submitter, fitResultId } = req.body;
+  if (!modificationNote) {
+    return res.status(400).json({ error: '请填写修改说明' });
+  }
+  if (!fitResultId) {
+    return res.status(400).json({ error: '请先执行新的拟合' });
+  }
+
+  const history = readJsonFile(HISTORY_FILE);
+  const fitResult = history.find(h => h.id === fitResultId);
+  if (!fitResult) {
+    return res.status(404).json({ error: '拟合结果不存在' });
+  }
+
+  const batches = readBatches();
+  const index = batches.findIndex(b => b.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: '批次不存在' });
+  }
+  const batch = batches[index];
+  if (!isValidTransition(batch.state, BATCH_STATES.DRAFT)) {
+    return res.status(400).json({ error: `当前状态「${batch.state}」不允许重新拟合` });
+  }
+
+  const now = new Date().toISOString();
+  const oldState = batch.state;
+  const oldFitResultSnapshot = {
+    modelEquation: batch.fitResult.modelEquation,
+    rSquared: batch.fitResult.metrics?.rSquared
+  };
+  batch.state = BATCH_STATES.DRAFT;
+  batch.submitter = submitter || batch.submitter;
+  batch.updatedAt = now;
+  batch.fitResultId = fitResultId;
+  batch.fitResult = {
+    id: fitResult.id,
+    datasetId: fitResult.datasetId,
+    datasetName: fitResult.datasetName,
+    modelType: fitResult.modelType,
+    modelEquation: fitResult.modelEquation,
+    params: fitResult.params,
+    metrics: fitResult.metrics,
+    points: fitResult.points,
+    curvePoints: fitResult.curvePoints,
+    residuals: fitResult.residuals,
+    outliers: fitResult.outliers
+  };
+  batch.modificationNotes.push({
+    note: modificationNote,
+    oldFitResult: oldFitResultSnapshot,
+    newFitResult: {
+      modelEquation: fitResult.modelEquation,
+      rSquared: fitResult.metrics?.rSquared
+    },
+    operator: batch.submitter,
+    timestamp: now
+  });
+  batch.stateHistory.push({
+    state: BATCH_STATES.DRAFT,
+    fromState: oldState,
+    timestamp: now,
+    operator: batch.submitter,
+    comment: `重新拟合：${modificationNote}`
+  });
+
+  batches[index] = batch;
+  writeBatches(batches);
+  res.json(batch);
+});
+
+app.post('/api/batches/:id/archive', (req, res) => {
+  const { id } = req.params;
+  const { operator } = req.body;
+  const batches = readBatches();
+  const index = batches.findIndex(b => b.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: '批次不存在' });
+  }
+  const batch = batches[index];
+  if (!isValidTransition(batch.state, BATCH_STATES.ARCHIVED)) {
+    return res.status(400).json({ error: `当前状态「${batch.state}」不允许归档` });
+  }
+
+  const now = new Date().toISOString();
+  const oldState = batch.state;
+  batch.state = BATCH_STATES.ARCHIVED;
+  batch.archivedAt = now;
+  batch.updatedAt = now;
+  batch.stateHistory.push({
+    state: BATCH_STATES.ARCHIVED,
+    fromState: oldState,
+    timestamp: now,
+    operator: operator || '系统',
+    comment: '已归档'
+  });
+
+  batches[index] = batch;
+  writeBatches(batches);
+  res.json(batch);
+});
+
+app.delete('/api/batches/:id', (req, res) => {
+  const { id } = req.params;
+  let batches = readBatches();
+  const batch = batches.find(b => b.id === id);
+  if (!batch) {
+    return res.status(404).json({ error: '批次不存在' });
+  }
+  if (batch.state !== BATCH_STATES.DRAFT && batch.state !== BATCH_STATES.RETURNED) {
+    return res.status(400).json({ error: '仅草稿或退回状态可删除' });
+  }
+  batches = batches.filter(b => b.id !== id);
+  writeBatches(batches);
+  res.json({ success: true });
+});
+
+app.get('/api/meta/states', (req, res) => {
+  res.json({
+    states: BATCH_STATES,
+    transitions: VALID_TRANSITIONS,
+    stateLabels: {
+      draft: '草稿',
+      pending: '待复核',
+      approved: '复核通过',
+      returned: '已退回',
+      voided: '已作废',
+      archived: '已归档'
+    }
+  });
 });
 
 app.listen(PORT, () => {

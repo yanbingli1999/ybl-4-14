@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>实验曲线拟合台</title>
+  <title>实验曲线拟合台 · 批次审批</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -11,146 +11,404 @@
   <div class="app-container">
     <header class="app-header">
       <h1>📈 实验曲线拟合台</h1>
-      <p class="subtitle">科学计算工具 · 支持线性/指数/二次曲线拟合</p>
+      <p class="subtitle">科学计算工具 · 支持线性/指数/二次曲线拟合 · 批次审批归档</p>
     </header>
 
-    <div class="main-layout">
-      <aside class="sidebar left-panel">
-        <div class="panel-section">
-          <h2>📋 数据录入</h2>
-          <div class="dataset-controls">
-            <input type="text" id="datasetName" placeholder="数据集名称" value="我的实验数据">
-          </div>
-          <div class="table-toolbar">
-            <button id="addRowBtn" class="btn btn-primary">➕ 添加行</button>
-            <button id="clearDataBtn" class="btn btn-secondary">🗑 清空</button>
-            <button id="loadSampleBtn" class="btn btn-info">📚 示例数据</button>
-          </div>
-          <div class="data-table-wrapper">
-            <table id="dataTable" class="data-table">
-              <thead>
-                <tr>
-                  <th style="width:50px">#</th>
-                  <th>X</th>
-                  <th>Y</th>
-                  <th style="width:60px">操作</th>
-                </tr>
-              </thead>
-              <tbody id="dataTableBody">
-              </tbody>
-            </table>
-          </div>
-        </div>
+    <nav class="module-nav">
+      <button class="module-btn active" data-module="lab">🔬 拟合实验台</button>
+      <button class="module-btn" data-module="approval">📋 批次审批流</button>
+    </nav>
 
-        <div class="panel-section">
-          <h2>🔬 拟合设置</h2>
-          <div class="model-selector">
-            <label class="model-option">
-              <input type="radio" name="modelType" value="linear" checked>
-              <span class="model-label">线性模型</span>
-              <span class="model-formula">y = ax + b</span>
-            </label>
-            <label class="model-option">
-              <input type="radio" name="modelType" value="exponential">
-              <span class="model-label">指数模型</span>
-              <span class="model-formula">y = a·eᵇˣ</span>
-            </label>
-            <label class="model-option">
-              <input type="radio" name="modelType" value="quadratic">
-              <span class="model-label">二次曲线</span>
-              <span class="model-formula">y = ax² + bx + c</span>
-            </label>
-          </div>
-          <button id="fitBtn" class="btn btn-success btn-large">🚀 执行拟合</button>
-        </div>
-
-        <div class="panel-section">
-          <h2>📊 误差指标</h2>
-          <div id="metricsPanel" class="metrics-panel">
-            <div class="metric-item">
-              <span class="metric-label">R² 决定系数</span>
-              <span class="metric-value" id="metricR2">—</span>
+    <div class="module-content" id="module-lab">
+      <div class="main-layout">
+        <aside class="sidebar left-panel">
+          <div class="panel-section">
+            <h2>📋 数据录入</h2>
+            <div class="dataset-controls">
+              <input type="text" id="datasetName" placeholder="数据集名称" value="我的实验数据">
             </div>
-            <div class="metric-item">
-              <span class="metric-label">MSE 均方误差</span>
-              <span class="metric-value" id="metricMSE">—</span>
+            <div class="table-toolbar">
+              <button id="addRowBtn" class="btn btn-primary">➕ 添加行</button>
+              <button id="clearDataBtn" class="btn btn-secondary">🗑 清空</button>
+              <button id="loadSampleBtn" class="btn btn-info">📚 示例数据</button>
             </div>
-            <div class="metric-item">
-              <span class="metric-label">RMSE 均方根</span>
-              <span class="metric-value" id="metricRMSE">—</span>
-            </div>
-            <div class="metric-item">
-              <span class="metric-label">MAE 平均绝对误差</span>
-              <span class="metric-value" id="metricMAE">—</span>
-            </div>
-            <div class="equation-display" id="equationDisplay">
-              <span class="eq-label">拟合方程:</span>
-              <span class="eq-formula" id="eqFormula">等待拟合...</span>
+            <div class="data-table-wrapper">
+              <table id="dataTable" class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width:50px">#</th>
+                    <th>X</th>
+                    <th>Y</th>
+                    <th style="width:60px">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="dataTableBody">
+                </tbody>
+              </table>
             </div>
           </div>
-        </div>
-      </aside>
 
-      <main class="center-panel">
-        <div class="charts-container">
-          <div class="chart-section">
-            <div class="chart-header">
-              <h2>📊 拟合曲线</h2>
-              <div class="legend-info">
-                <span class="legend-item"><span class="legend-color" style="background:#3b82f6"></span>原始数据</span>
-                <span class="legend-item"><span class="legend-color" style="background:#ef4444"></span>拟合曲线</span>
-                <span class="legend-item"><span class="legend-color" style="background:#f59e0b"></span>异常点</span>
+          <div class="panel-section">
+            <h2>🔬 拟合设置</h2>
+            <div class="model-selector">
+              <label class="model-option">
+                <input type="radio" name="modelType" value="linear" checked>
+                <span class="model-label">线性模型</span>
+                <span class="model-formula">y = ax + b</span>
+              </label>
+              <label class="model-option">
+                <input type="radio" name="modelType" value="exponential">
+                <span class="model-label">指数模型</span>
+                <span class="model-formula">y = a·eᵇˣ</span>
+              </label>
+              <label class="model-option">
+                <input type="radio" name="modelType" value="quadratic">
+                <span class="model-label">二次曲线</span>
+                <span class="model-formula">y = ax² + bx + c</span>
+              </label>
+            </div>
+            <button id="fitBtn" class="btn btn-success btn-large">🚀 执行拟合</button>
+          </div>
+
+          <div class="panel-section">
+            <h2>📊 误差指标</h2>
+            <div id="metricsPanel" class="metrics-panel">
+              <div class="metric-item">
+                <span class="metric-label">R² 决定系数</span>
+                <span class="metric-value" id="metricR2">—</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">MSE 均方误差</span>
+                <span class="metric-value" id="metricMSE">—</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">RMSE 均方根</span>
+                <span class="metric-value" id="metricRMSE">—</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">MAE 平均绝对误差</span>
+                <span class="metric-value" id="metricMAE">—</span>
+              </div>
+              <div class="equation-display" id="equationDisplay">
+                <span class="eq-label">拟合方程:</span>
+                <span class="eq-formula" id="eqFormula">等待拟合...</span>
               </div>
             </div>
-            <div class="chart-wrapper">
-              <canvas id="fitChart"></canvas>
+            <div id="createBatchArea" style="display:none;margin-top:12px;">
+              <button id="createBatchBtn" class="btn btn-info btn-block">📝 建立审批批次草稿</button>
             </div>
           </div>
+        </aside>
 
-          <div class="chart-section">
-            <div class="chart-header">
-              <h2>📉 残差分析</h2>
-              <div class="legend-info">
-                <span class="legend-item"><span class="legend-color" style="background:#8b5cf6"></span>残差</span>
-                <span class="legend-item"><span class="legend-color" style="background:#10b981;border-style:dashed"></span>零参考线</span>
+        <main class="center-panel">
+          <div class="charts-container">
+            <div class="chart-section">
+              <div class="chart-header">
+                <h2>📊 拟合曲线</h2>
+                <div class="legend-info">
+                  <span class="legend-item"><span class="legend-color" style="background:#3b82f6"></span>原始数据</span>
+                  <span class="legend-item"><span class="legend-color" style="background:#ef4444"></span>拟合曲线</span>
+                  <span class="legend-item"><span class="legend-color" style="background:#f59e0b"></span>异常点</span>
+                </div>
+              </div>
+              <div class="chart-wrapper">
+                <canvas id="fitChart"></canvas>
               </div>
             </div>
-            <div class="chart-wrapper">
-              <canvas id="residualChart"></canvas>
+
+            <div class="chart-section">
+              <div class="chart-header">
+                <h2>📉 残差分析</h2>
+                <div class="legend-info">
+                  <span class="legend-item"><span class="legend-color" style="background:#8b5cf6"></span>残差</span>
+                  <span class="legend-item"><span class="legend-color" style="background:#10b981;border-style:dashed"></span>零参考线</span>
+                </div>
+              </div>
+              <div class="chart-wrapper">
+                <canvas id="residualChart"></canvas>
+              </div>
             </div>
+          </div>
+
+          <div class="outliers-section" id="outliersSection" style="display:none;">
+            <h3>⚠️ 异常点标记 (Z-score > 2)</h3>
+            <div id="outliersList" class="outliers-list"></div>
+          </div>
+        </main>
+
+        <aside class="sidebar right-panel">
+          <div class="panel-section">
+            <div class="tabs">
+              <button class="tab-btn active" data-tab="history">📜 历史记录</button>
+              <button class="tab-btn" data-tab="datasets">💾 数据集</button>
+            </div>
+
+            <div class="tab-content" id="tab-history">
+              <div id="historyList" class="history-list">
+                <div class="empty-state">暂无历史记录</div>
+              </div>
+            </div>
+
+            <div class="tab-content" id="tab-datasets" style="display:none;">
+              <div class="dataset-actions">
+                <button id="updateDatasetBtn" class="btn btn-success btn-block" style="display:none;">💾 更新当前数据集</button>
+                <button id="saveDatasetBtn" class="btn btn-primary btn-block">➕ 另存为新数据集</button>
+              </div>
+              <div id="datasetsList" class="datasets-list">
+                <div class="empty-state">暂无保存的数据集</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="module-content" id="module-approval" style="display:none;">
+      <div class="approval-layout">
+        <aside class="approval-sidebar">
+          <div class="panel-section">
+            <h2>🗂 批次分类</h2>
+            <div class="batch-filters">
+              <button class="filter-btn active" data-filter="all">全部批次 <span class="filter-count" id="countAll">0</span></button>
+              <button class="filter-btn" data-filter="draft">📝 草稿 <span class="filter-count" id="countDraft">0</span></button>
+              <button class="filter-btn" data-filter="pending">⏳ 待复核 <span class="filter-count" id="countPending">0</span></button>
+              <button class="filter-btn" data-filter="approved">✅ 复核通过 <span class="filter-count" id="countApproved">0</span></button>
+              <button class="filter-btn" data-filter="returned">↩️ 已退回 <span class="filter-count" id="countReturned">0</span></button>
+              <button class="filter-btn" data-filter="voided">❌ 已作废 <span class="filter-count" id="countVoided">0</span></button>
+              <button class="filter-btn" data-filter="archived">📦 已归档 <span class="filter-count" id="countArchived">0</span></button>
+            </div>
+            <div style="margin-top:16px;">
+              <button id="newBatchFromFitBtn" class="btn btn-primary btn-block">📝 新建批次（从拟合结果）</button>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h2>📋 批次列表</h2>
+            <div id="batchList" class="batch-list">
+              <div class="empty-state">暂无批次，点击"新建批次"开始</div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="approval-main">
+          <div id="batchDetailEmpty" class="panel-section batch-detail-empty">
+            <div class="empty-state-large">
+              <div style="font-size:64px;margin-bottom:16px;">📄</div>
+              <p>请从左侧选择一个批次查看详情</p>
+              <p style="color:#94a3b8;font-size:13px;margin-top:8px;">或新建一个审批批次开始流程</p>
+            </div>
+          </div>
+          <div id="batchDetail" style="display:none;" class="batch-detail-wrapper">
+            <div class="panel-section">
+              <div class="batch-detail-header">
+                <div>
+                  <h2 class="batch-title" id="detailTitle">批次标题</h2>
+                  <div class="batch-meta">
+                    <span class="batch-no" id="detailBatchNo">BATCH-2024-00001</span>
+                    <span class="status-badge" id="detailStatus">草稿</span>
+                    <span id="detailTime"></span>
+                  </div>
+                </div>
+                <div class="batch-actions" id="detailActions"></div>
+              </div>
+
+              <div class="batch-info-grid">
+                <div class="info-card">
+                  <div class="info-label">提交人</div>
+                  <div class="info-value" id="detailSubmitter">—</div>
+                </div>
+                <div class="info-card">
+                  <div class="info-label">复核人</div>
+                  <div class="info-value" id="detailReviewer">—</div>
+                </div>
+                <div class="info-card">
+                  <div class="info-label">数据集</div>
+                  <div class="info-value" id="detailDataset">—</div>
+                </div>
+                <div class="info-card">
+                  <div class="info-label">拟合模型</div>
+                  <div class="info-value" id="detailModel">—</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-section">
+              <h3>🔬 拟合结果</h3>
+              <div class="fit-result-metrics" id="fitMetrics"></div>
+              <div class="equation-display" style="margin-top:12px;">
+                <span class="eq-label">拟合方程:</span>
+                <span class="eq-formula" id="detailEquation">—</span>
+              </div>
+              <div class="chart-grid">
+                <div class="chart-box">
+                  <div class="chart-box-header">📊 拟合曲线</div>
+                  <div class="chart-wrapper small"><canvas id="detailFitChart"></canvas></div>
+                </div>
+                <div class="chart-box">
+                  <div class="chart-box-header">📉 残差分析</div>
+                  <div class="chart-wrapper small"><canvas id="detailResidualChart"></canvas></div>
+                </div>
+              </div>
+            </div>
+
+            <div id="reviewOpinionSection" class="panel-section" style="display:none;">
+              <h3>📝 复核意见</h3>
+              <div id="reviewOpinionBox" class="review-opinion"></div>
+            </div>
+
+            <div id="modificationSection" class="panel-section" style="display:none;">
+              <h3>🔄 修改记录</h3>
+              <div id="modificationList" class="modification-list"></div>
+            </div>
+
+            <div class="panel-section">
+              <h3>📜 状态流转记录</h3>
+              <div id="stateTimeline" class="state-timeline"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="modalCreateBatch" class="modal" style="display:none;">
+      <div class="modal-overlay" onclick="closeModal('modalCreateBatch')"></div>
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>📝 建立审批批次草稿</h3>
+          <button class="modal-close" onclick="closeModal('modalCreateBatch')">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>批次标题 *</label>
+            <input type="text" id="newBatchTitle" placeholder="例如：2024年6月材料力学实验-第1批">
+          </div>
+          <div class="form-group">
+            <label>提交人</label>
+            <input type="text" id="newBatchSubmitter" placeholder="请输入提交人姓名" value="实验员">
+          </div>
+          <div class="form-group">
+            <label>关联拟合结果 *</label>
+            <div id="newBatchFitSelector" class="fit-selector"></div>
           </div>
         </div>
-
-        <div class="outliers-section" id="outliersSection" style="display:none;">
-          <h3>⚠️ 异常点标记 (Z-score > 2)</h3>
-          <div id="outliersList" class="outliers-list"></div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('modalCreateBatch')">取消</button>
+          <button class="btn btn-primary" onclick="submitCreateBatch()">创建草稿</button>
         </div>
-      </main>
+      </div>
+    </div>
 
-      <aside class="sidebar right-panel">
-        <div class="panel-section">
-          <div class="tabs">
-            <button class="tab-btn active" data-tab="history">📜 历史记录</button>
-            <button class="tab-btn" data-tab="datasets">💾 数据集</button>
-          </div>
-
-          <div class="tab-content" id="tab-history">
-            <div id="historyList" class="history-list">
-              <div class="empty-state">暂无历史记录</div>
-            </div>
-          </div>
-
-          <div class="tab-content" id="tab-datasets" style="display:none;">
-            <div class="dataset-actions">
-              <button id="updateDatasetBtn" class="btn btn-success btn-block" style="display:none;">💾 更新当前数据集</button>
-              <button id="saveDatasetBtn" class="btn btn-primary btn-block">➕ 另存为新数据集</button>
-            </div>
-            <div id="datasetsList" class="datasets-list">
-              <div class="empty-state">暂无保存的数据集</div>
-            </div>
+    <div id="modalSubmitBatch" class="modal" style="display:none;">
+      <div class="modal-overlay" onclick="closeModal('modalSubmitBatch')"></div>
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>⏳ 提交复核</h3>
+          <button class="modal-close" onclick="closeModal('modalSubmitBatch')">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-hint">将批次 <strong id="submitBatchName"></strong> 提交至复核人审核，提交后状态将变更为「待复核」。</p>
+          <div class="form-group">
+            <label>提交人确认</label>
+            <input type="text" id="submitBatchSubmitter" placeholder="请输入提交人姓名">
           </div>
         </div>
-      </aside>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('modalSubmitBatch')">取消</button>
+          <button class="btn btn-primary" onclick="confirmSubmitBatch()">确认提交</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalReviewBatch" class="modal" style="display:none;">
+      <div class="modal-overlay" onclick="closeModal('modalReviewBatch')"></div>
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>🔍 复核审批</h3>
+          <button class="modal-close" onclick="closeModal('modalReviewBatch')">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-hint">正在复核批次 <strong id="reviewBatchName"></strong>，请选择复核结论并填写意见。</p>
+          <div class="form-group">
+            <label>复核人 *</label>
+            <input type="text" id="reviewReviewer" placeholder="请输入复核人姓名" value="复核人">
+          </div>
+          <div class="form-group">
+            <label>复核决定 *</label>
+            <div class="review-decision-radio">
+              <label class="decision-option approved">
+                <input type="radio" name="reviewDecision" value="approved">
+                <span>✅ 复核通过</span>
+                <small>结果符合要求，进入归档列表</small>
+              </label>
+              <label class="decision-option returned">
+                <input type="radio" name="reviewDecision" value="returned">
+                <span>↩️ 退回修改</span>
+                <small>需要重新拟合并填写修改说明</small>
+              </label>
+              <label class="decision-option voided">
+                <input type="radio" name="reviewDecision" value="voided">
+                <span>❌ 作废处理</span>
+                <small>批次作废，不可再修改</small>
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>复核意见</label>
+            <textarea id="reviewComment" rows="4" placeholder="请填写复核意见（可选）"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('modalReviewBatch')">取消</button>
+          <button class="btn btn-success" onclick="confirmReviewBatch()">提交复核意见</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalRefitBatch" class="modal" style="display:none;">
+      <div class="modal-overlay" onclick="closeModal('modalRefitBatch')"></div>
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>🔄 退回重新拟合</h3>
+          <button class="modal-close" onclick="closeModal('modalRefitBatch')">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-hint">批次 <strong id="refitBatchName"></strong> 处于「已退回」状态，请先执行新的拟合并填写修改说明。</p>
+          <div class="form-group">
+            <label>修改说明 *</label>
+            <textarea id="refitNote" rows="3" placeholder="请详细说明修改内容，如：调整了第3、5个异常数据点"></textarea>
+          </div>
+          <div class="form-group">
+            <label>新拟合结果 *</label>
+            <div id="refitFitSelector" class="fit-selector"></div>
+            <p class="form-hint">💡 请前往「拟合实验台」执行新的拟合，然后在此处选择新结果。</p>
+          </div>
+          <div class="form-group">
+            <label>提交人</label>
+            <input type="text" id="refitSubmitter" placeholder="请输入提交人姓名" value="实验员">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('modalRefitBatch')">取消</button>
+          <button class="btn btn-primary" onclick="confirmRefitBatch()">保存修改（回到草稿）</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalArchiveBatch" class="modal" style="display:none;">
+      <div class="modal-overlay" onclick="closeModal('modalArchiveBatch')"></div>
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3>📦 归档确认</h3>
+          <button class="modal-close" onclick="closeModal('modalArchiveBatch')">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-hint">批次 <strong id="archiveBatchName"></strong> 已通过复核，确认归档？归档后将进入归档列表，不可再修改。</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('modalArchiveBatch')">取消</button>
+          <button class="btn btn-success" onclick="confirmArchiveBatch()">确认归档</button>
+        </div>
+      </div>
     </div>
 
     <div id="toast" class="toast"></div>

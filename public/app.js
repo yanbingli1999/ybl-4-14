@@ -4,10 +4,35 @@ let currentResultId = null;
 let currentDatasetId = null;
 let isDirty = false;
 
+let detailFitChart = null;
+let detailResidualChart = null;
+
+let currentBatchFilter = 'all';
+let currentSelectedBatchId = null;
+let metaInfo = null;
+
 const modelTypeLabels = {
   linear: '线性模型',
   exponential: '指数模型',
   quadratic: '二次曲线'
+};
+
+const stateLabelMap = {
+  draft: '草稿',
+  pending: '待复核',
+  approved: '复核通过',
+  returned: '已退回',
+  voided: '已作废',
+  archived: '已归档'
+};
+
+const stateBadgeClass = {
+  draft: 'status-draft',
+  pending: 'status-pending',
+  approved: 'status-approved',
+  returned: 'status-returned',
+  voided: 'status-voided',
+  archived: 'status-archived'
 };
 
 function showToast(message, type = 'info') {
@@ -185,6 +210,51 @@ function initCharts() {
   });
 }
 
+function initDetailCharts() {
+  const fitCtx = document.getElementById('detailFitChart');
+  const residualCtx = document.getElementById('detailResidualChart');
+  if (!fitCtx || !residualCtx) return;
+
+  detailFitChart = new Chart(fitCtx.getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        { label: '原始数据', data: [], backgroundColor: '#3b82f6', borderColor: '#3b82f6', pointRadius: 5, showLine: false },
+        { label: '拟合曲线', data: [], borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 2, pointRadius: 0, showLine: true, tension: 0.1, fill: false },
+        { label: '异常点', data: [], backgroundColor: '#f59e0b', borderColor: '#d97706', pointRadius: 7, pointStyle: 'triangle', showLine: false }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { type: 'linear', position: 'bottom', grid: { color: 'rgba(148,163,184,0.2)' }, ticks: { font: { size: 11 }, color: '#64748b' } },
+        y: { grid: { color: 'rgba(148,163,184,0.2)' }, ticks: { font: { size: 11 }, color: '#64748b' } }
+      }
+    }
+  });
+
+  detailResidualChart = new Chart(residualCtx.getContext('2d'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        { label: '残差', data: [], backgroundColor: '#8b5cf6', borderColor: '#8b5cf6', pointRadius: 4, showLine: false },
+        { label: '零参考线', data: [], borderColor: '#10b981', borderWidth: 2, borderDash: [8, 4], pointRadius: 0, showLine: true, fill: false }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { type: 'linear', position: 'bottom', grid: { color: 'rgba(148,163,184,0.2)' }, ticks: { font: { size: 11 }, color: '#64748b' } },
+        y: { grid: { color: 'rgba(148,163,184,0.2)' }, ticks: { font: { size: 11 }, color: '#64748b' } }
+      }
+    }
+  });
+}
+
 function addDataRow(x = '', y = '') {
   const tbody = document.getElementById('dataTableBody');
   const rowIndex = tbody.children.length + 1;
@@ -232,6 +302,7 @@ function resetDisplay() {
   document.getElementById('metricMAE').textContent = '—';
   document.getElementById('eqFormula').textContent = '等待拟合...';
   document.getElementById('outliersSection').style.display = 'none';
+  document.getElementById('createBatchArea').style.display = 'none';
 
   if (fitChart) {
     fitChart.data.datasets.forEach(ds => ds.data = []);
@@ -314,7 +385,8 @@ async function performFit() {
 
     displayFitResult(data);
     currentResultId = data.id;
-    showToast('拟合完成！', 'success');
+    document.getElementById('createBatchArea').style.display = 'block';
+    showToast('拟合完成！可创建审批批次', 'success');
     loadHistory();
   } catch (err) {
     showToast(err.message, 'error');
@@ -425,6 +497,7 @@ async function loadHistoryItem(id) {
     displayFitResult(data);
     currentResultId = id;
     currentDatasetId = data.datasetId || null;
+    document.getElementById('createBatchArea').style.display = 'block';
     clearDirty();
     showToast('已加载历史记录', 'success');
   } catch (err) {
@@ -578,6 +651,510 @@ function initTabs() {
   });
 }
 
+function initModuleNav() {
+  const moduleBtns = document.querySelectorAll('.module-btn');
+  moduleBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const module = btn.dataset.module;
+      moduleBtns.forEach(b => b.classList.toggle('active', b.dataset.module === module));
+      document.getElementById('module-lab').style.display = module === 'lab' ? 'block' : 'none';
+      document.getElementById('module-approval').style.display = module === 'approval' ? 'block' : 'none';
+      if (module === 'approval') {
+        loadBatches();
+        setTimeout(() => {
+          initDetailCharts();
+        }, 100);
+      }
+    });
+  });
+}
+
+function initBatchFilters() {
+  const filterBtns = document.querySelectorAll('.filter-btn');
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentBatchFilter = btn.dataset.filter;
+      filterBtns.forEach(b => b.classList.toggle('active', b.dataset.filter === currentBatchFilter));
+      loadBatches();
+    });
+  });
+}
+
+async function loadMetaInfo() {
+  try {
+    const res = await fetch('/api/meta/states');
+    metaInfo = await res.json();
+  } catch (err) {
+    console.error('加载元数据失败:', err);
+  }
+}
+
+async function loadBatches() {
+  try {
+    const url = currentBatchFilter === 'all' ? '/api/batches' : `/api/batches?state=${currentBatchFilter}`;
+    const res = await fetch(url);
+    const batches = await res.json();
+    renderBatchList(batches);
+    updateBatchCounts();
+  } catch (err) {
+    console.error('加载批次失败:', err);
+  }
+}
+
+async function updateBatchCounts() {
+  try {
+    const res = await fetch('/api/batches');
+    const all = await res.json();
+    document.getElementById('countAll').textContent = all.length;
+    document.getElementById('countDraft').textContent = all.filter(b => b.state === 'draft').length;
+    document.getElementById('countPending').textContent = all.filter(b => b.state === 'pending').length;
+    document.getElementById('countApproved').textContent = all.filter(b => b.state === 'approved').length;
+    document.getElementById('countReturned').textContent = all.filter(b => b.state === 'returned').length;
+    document.getElementById('countVoided').textContent = all.filter(b => b.state === 'voided').length;
+    document.getElementById('countArchived').textContent = all.filter(b => b.state === 'archived').length;
+  } catch (err) {
+    console.error('更新计数失败:', err);
+  }
+}
+
+function renderBatchList(batches) {
+  const list = document.getElementById('batchList');
+  if (batches.length === 0) {
+    list.innerHTML = '<div class="empty-state">暂无符合条件的批次</div>';
+    return;
+  }
+  list.innerHTML = batches.map(b => `
+    <div class="batch-list-item ${currentSelectedBatchId === b.id ? 'selected' : ''}" data-id="${b.id}" onclick="selectBatch('${b.id}')">
+      <div class="batch-list-header">
+        <span class="batch-list-title">${b.title}</span>
+        <span class="status-badge ${stateBadgeClass[b.state] || ''}">${stateLabelMap[b.state] || b.state}</span>
+      </div>
+      <div class="batch-list-meta">
+        <span class="batch-no-mini">${b.batchNo}</span>
+      </div>
+      <div class="batch-list-info">
+        <span>${modelTypeLabels[b.modelType] || b.modelType}</span>
+        <span>R²=${b.rSquared ? b.rSquared.toFixed(4) : '—'}</span>
+      </div>
+      <div class="batch-list-footer">
+        <span>${b.submitter || '未指定'}</span>
+        <span>${formatDate(b.updatedAt || b.createdAt)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+async function selectBatch(id) {
+  currentSelectedBatchId = id;
+  try {
+    const res = await fetch(`/api/batches/${id}`);
+    const batch = await res.json();
+    if (!res.ok) throw new Error(batch.error);
+    renderBatchDetail(batch);
+    loadBatches();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function renderBatchDetail(batch) {
+  document.getElementById('batchDetailEmpty').style.display = 'none';
+  document.getElementById('batchDetail').style.display = 'block';
+
+  document.getElementById('detailTitle').textContent = batch.title;
+  document.getElementById('detailBatchNo').textContent = batch.batchNo;
+  const statusEl = document.getElementById('detailStatus');
+  statusEl.textContent = stateLabelMap[batch.state] || batch.state;
+  statusEl.className = `status-badge ${stateBadgeClass[batch.state] || ''}`;
+  document.getElementById('detailTime').textContent = `创建: ${formatDate(batch.createdAt)}`;
+
+  document.getElementById('detailSubmitter').textContent = batch.submitter || '—';
+  document.getElementById('detailReviewer').textContent = batch.reviewer || '—';
+  document.getElementById('detailDataset').textContent = batch.fitResult?.datasetName || '—';
+  document.getElementById('detailModel').textContent = modelTypeLabels[batch.fitResult?.modelType] || batch.fitResult?.modelType || '—';
+
+  renderDetailActions(batch);
+  renderFitMetrics(batch.fitResult);
+  renderDetailCharts(batch.fitResult);
+  renderReviewOpinion(batch);
+  renderModificationNotes(batch);
+  renderStateTimeline(batch.stateHistory);
+}
+
+function renderDetailActions(batch) {
+  const container = document.getElementById('detailActions');
+  const state = batch.state;
+  let buttons = [];
+
+  switch (state) {
+    case 'draft':
+      buttons.push(`<button class="btn btn-success" onclick="openSubmitModal('${batch.id}')">⏳ 提交复核</button>`);
+      buttons.push(`<button class="btn btn-danger" onclick="deleteBatch('${batch.id}')">🗑 删除</button>`);
+      break;
+    case 'pending':
+      buttons.push(`<button class="btn btn-primary" onclick="openReviewModal('${batch.id}')">🔍 开始复核</button>`);
+      break;
+    case 'approved':
+      buttons.push(`<button class="btn btn-success" onclick="openArchiveModal('${batch.id}')">📦 立即归档</button>`);
+      break;
+    case 'returned':
+      buttons.push(`<button class="btn btn-primary" onclick="openRefitModal('${batch.id}')">🔄 重新拟合</button>`);
+      buttons.push(`<button class="btn btn-danger" onclick="deleteBatch('${batch.id}')">🗑 删除</button>`);
+      break;
+    case 'voided':
+    case 'archived':
+      buttons.push(`<span style="color:#94a3b8;font-size:12px;padding:6px 10px;">流程已结束</span>`);
+      break;
+  }
+
+  container.innerHTML = buttons.join('');
+}
+
+function renderFitMetrics(fitResult) {
+  if (!fitResult) return;
+  const m = fitResult.metrics || {};
+  document.getElementById('fitMetrics').innerHTML = `
+    <div class="metric-item-box"><div class="metric-box-label">R²</div><div class="metric-box-value">${m.rSquared ? m.rSquared.toFixed(6) : '—'}</div></div>
+    <div class="metric-item-box"><div class="metric-box-label">MSE</div><div class="metric-box-value">${m.mse ? m.mse.toFixed(6) : '—'}</div></div>
+    <div class="metric-item-box"><div class="metric-box-label">RMSE</div><div class="metric-box-value">${m.rmse ? m.rmse.toFixed(6) : '—'}</div></div>
+    <div class="metric-item-box"><div class="metric-box-label">MAE</div><div class="metric-box-value">${m.mae ? m.mae.toFixed(6) : '—'}</div></div>
+  `;
+  document.getElementById('detailEquation').textContent = fitResult.modelEquation || '—';
+}
+
+function renderDetailCharts(fitResult) {
+  if (!fitResult || !detailFitChart || !detailResidualChart) return;
+
+  const outlierIndices = new Set((fitResult.outliers || []).filter(o => o.isOutlier).map(o => o.index));
+  const normalPoints = [];
+  const outlierPoints = [];
+  (fitResult.points || []).forEach((p, i) => {
+    if (outlierIndices.has(i)) outlierPoints.push(p);
+    else normalPoints.push(p);
+  });
+
+  detailFitChart.data.datasets[0].data = normalPoints;
+  detailFitChart.data.datasets[1].data = fitResult.curvePoints || [];
+  detailFitChart.data.datasets[2].data = outlierPoints;
+  detailFitChart.update();
+
+  const residualData = (fitResult.points || []).map((p, i) => ({
+    x: p.x, y: (fitResult.residuals || [])[i] || 0
+  }));
+  const xs = (fitResult.points || []).map(p => p.x);
+  const minX = xs.length ? Math.min(...xs) : 0;
+  const maxX = xs.length ? Math.max(...xs) : 1;
+  const range = maxX - minX || 1;
+  detailResidualChart.data.datasets[0].data = residualData;
+  detailResidualChart.data.datasets[1].data = [
+    { x: minX - range * 0.1, y: 0 },
+    { x: maxX + range * 0.1, y: 0 }
+  ];
+  detailResidualChart.update();
+}
+
+function renderReviewOpinion(batch) {
+  const section = document.getElementById('reviewOpinionSection');
+  const box = document.getElementById('reviewOpinionBox');
+  if (!batch.reviewOpinion) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  const opinion = batch.reviewOpinion;
+  const decisionLabels = { approved: '✅ 复核通过', returned: '↩️ 退回修改', voided: '❌ 作废' };
+  box.innerHTML = `
+    <div class="opinion-header">
+      <span class="opinion-decision ${stateBadgeClass[opinion.decision] || ''}">${decisionLabels[opinion.decision] || opinion.decision}</span>
+      <span class="opinion-meta">
+        复核人: <strong>${opinion.reviewer}</strong> · ${formatDate(opinion.timestamp)}
+      </span>
+    </div>
+    ${opinion.comment ? `<div class="opinion-comment">${opinion.comment}</div>` : ''}
+  `;
+}
+
+function renderModificationNotes(batch) {
+  const section = document.getElementById('modificationSection');
+  const list = document.getElementById('modificationList');
+  if (!batch.modificationNotes || batch.modificationNotes.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  list.innerHTML = batch.modificationNotes.map((note, idx) => `
+    <div class="modification-item">
+      <div class="modification-header">
+        <span class="modification-index">第 ${idx + 1} 次修改</span>
+        <span class="modification-meta">${note.operator} · ${formatDate(note.timestamp)}</span>
+      </div>
+      <div class="modification-note-text">${note.note}</div>
+      <div class="modification-compare">
+        <div class="modification-compare-item old">
+          <div class="compare-label">修改前</div>
+          <div class="compare-eq">${note.oldFitResult?.modelEquation || '—'}</div>
+          <div class="compare-r2">R²=${note.oldFitResult?.rSquared ? note.oldFitResult.rSquared.toFixed(4) : '—'}</div>
+        </div>
+        <div class="modification-arrow">→</div>
+        <div class="modification-compare-item new">
+          <div class="compare-label">修改后</div>
+          <div class="compare-eq">${note.newFitResult?.modelEquation || '—'}</div>
+          <div class="compare-r2">R²=${note.newFitResult?.rSquared ? note.newFitResult.rSquared.toFixed(4) : '—'}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderStateTimeline(history) {
+  const container = document.getElementById('stateTimeline');
+  if (!history || history.length === 0) {
+    container.innerHTML = '<div class="empty-state-small">暂无流转记录</div>';
+    return;
+  }
+  container.innerHTML = history.map((entry, idx) => {
+    const isLast = idx === history.length - 1;
+    const stateText = stateLabelMap[entry.state] || entry.state;
+    const fromText = entry.fromState ? `（由 ${stateLabelMap[entry.fromState] || entry.fromState}）` : '';
+    return `
+      <div class="timeline-item">
+        <div class="timeline-dot ${stateBadgeClass[entry.state] || ''}">${isLast ? '●' : '○'}</div>
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <span class="timeline-state">${stateText}</span>
+            <span class="timeline-from">${fromText}</span>
+            <span class="timeline-time">${formatDate(entry.timestamp)}</span>
+          </div>
+          <div class="timeline-operator">操作人：${entry.operator || '系统'}</div>
+          <div class="timeline-comment">${entry.comment || ''}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openModal(id) {
+  document.getElementById(id).style.display = 'flex';
+}
+
+function closeModal(id) {
+  document.getElementById(id).style.display = 'none';
+}
+
+async function openCreateBatchModal(preselectedFitId = null) {
+  document.getElementById('newBatchTitle').value = '';
+  document.getElementById('newBatchSubmitter').value = '实验员';
+  await populateFitSelector('newBatchFitSelector', preselectedFitId);
+  if (preselectedFitId) {
+    const sel = document.querySelector(`input[name="newBatchFitId"][value="${preselectedFitId}"]`);
+    if (sel) sel.checked = true;
+  }
+  openModal('modalCreateBatch');
+}
+
+async function openSubmitModal(id) {
+  const res = await fetch(`/api/batches/${id}`);
+  const batch = await res.json();
+  document.getElementById('submitBatchName').textContent = batch.title;
+  document.getElementById('submitBatchSubmitter').value = batch.submitter || '';
+  window._pendingBatchId = id;
+  openModal('modalSubmitBatch');
+}
+
+async function confirmSubmitBatch() {
+  const id = window._pendingBatchId;
+  const submitter = document.getElementById('submitBatchSubmitter').value.trim();
+  if (!submitter) { showToast('请填写提交人', 'error'); return; }
+  try {
+    const res = await fetch(`/api/batches/${id}/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ submitter })
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    closeModal('modalSubmitBatch');
+    showToast('已提交复核', 'success');
+    await selectBatch(id);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function openReviewModal(id) {
+  const res = await fetch(`/api/batches/${id}`);
+  const batch = await res.json();
+  document.getElementById('reviewBatchName').textContent = batch.title;
+  document.getElementById('reviewReviewer').value = '复核人';
+  document.getElementById('reviewComment').value = '';
+  document.querySelectorAll('input[name="reviewDecision"]').forEach(r => r.checked = false);
+  window._pendingBatchId = id;
+  openModal('modalReviewBatch');
+}
+
+async function confirmReviewBatch() {
+  const id = window._pendingBatchId;
+  const reviewer = document.getElementById('reviewReviewer').value.trim();
+  const decisionEl = document.querySelector('input[name="reviewDecision"]:checked');
+  const comment = document.getElementById('reviewComment').value.trim();
+  if (!reviewer) { showToast('请填写复核人', 'error'); return; }
+  if (!decisionEl) { showToast('请选择复核决定', 'error'); return; }
+  try {
+    const res = await fetch(`/api/batches/${id}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: decisionEl.value, reviewer, comment })
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    closeModal('modalReviewBatch');
+    showToast('复核意见已提交', 'success');
+    await selectBatch(id);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function openRefitModal(id) {
+  const res = await fetch(`/api/batches/${id}`);
+  const batch = await res.json();
+  document.getElementById('refitBatchName').textContent = batch.title;
+  document.getElementById('refitNote').value = '';
+  document.getElementById('refitSubmitter').value = batch.submitter || '实验员';
+  await populateFitSelector('refitFitSelector', null, batch.fitResultId);
+  window._pendingBatchId = id;
+  openModal('modalRefitBatch');
+}
+
+async function confirmRefitBatch() {
+  const id = window._pendingBatchId;
+  const note = document.getElementById('refitNote').value.trim();
+  const submitter = document.getElementById('refitSubmitter').value.trim();
+  const fitIdEl = document.querySelector('input[name="refitFitId"]:checked');
+  if (!note) { showToast('请填写修改说明', 'error'); return; }
+  if (!fitIdEl) { showToast('请选择新的拟合结果', 'error'); return; }
+  try {
+    const res = await fetch(`/api/batches/${id}/refit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modificationNote: note, submitter, fitResultId: fitIdEl.value })
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    closeModal('modalRefitBatch');
+    showToast('已保存修改，回到草稿状态', 'success');
+    await selectBatch(id);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function openArchiveModal(id) {
+  const res = await fetch(`/api/batches/${id}`);
+  const batch = await res.json();
+  document.getElementById('archiveBatchName').textContent = batch.title;
+  window._pendingBatchId = id;
+  openModal('modalArchiveBatch');
+}
+
+async function confirmArchiveBatch() {
+  const id = window._pendingBatchId;
+  try {
+    const res = await fetch(`/api/batches/${id}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operator: '系统' })
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    closeModal('modalArchiveBatch');
+    showToast('已归档', 'success');
+    await selectBatch(id);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function populateFitSelector(containerId, preselectedId = null, excludeId = null) {
+  const container = document.getElementById(containerId);
+  try {
+    const res = await fetch('/api/history');
+    const history = await res.json();
+    if (history.length === 0) {
+      container.innerHTML = '<div class="empty-state-small">暂无拟合结果，请先在拟合实验台中执行拟合</div>';
+      return;
+    }
+    const filtered = excludeId ? history.filter(h => h.id !== excludeId) : history;
+    if (filtered.length === 0) {
+      container.innerHTML = '<div class="empty-state-small">暂无其他拟合结果</div>';
+      return;
+    }
+    const radioName = containerId === 'newBatchFitSelector' ? 'newBatchFitId' : 'refitFitId';
+    container.innerHTML = filtered.map((h, idx) => {
+      const checked = preselectedId === h.id ? 'checked' : (!preselectedId && idx === 0 ? 'checked' : '');
+      return `
+        <label class="fit-option">
+          <input type="radio" name="${radioName}" value="${h.id}" ${checked}>
+          <div class="fit-option-info">
+            <div class="fit-option-title">${h.datasetName}</div>
+            <div class="fit-option-meta">
+              <span class="history-model-mini">${modelTypeLabels[h.modelType] || h.modelType}</span>
+              <span>${h.pointsCount} 点</span>
+              <span>R²=${h.metrics.rSquared.toFixed(4)}</span>
+              <span>${formatDate(h.createdAt)}</span>
+            </div>
+            <div class="fit-option-eq">${h.modelEquation}</div>
+          </div>
+        </label>
+      `;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state-small">加载失败</div>';
+  }
+}
+
+async function submitCreateBatch() {
+  const title = document.getElementById('newBatchTitle').value.trim();
+  const submitter = document.getElementById('newBatchSubmitter').value.trim();
+  const fitIdEl = document.querySelector('input[name="newBatchFitId"]:checked');
+  if (!title) { showToast('请输入批次标题', 'error'); return; }
+  if (!fitIdEl) { showToast('请选择拟合结果', 'error'); return; }
+  try {
+    const res = await fetch('/api/batches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, submitter, fitResultId: fitIdEl.value })
+    });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    const batch = await res.json();
+    closeModal('modalCreateBatch');
+    showToast('批次草稿已创建', 'success');
+    currentSelectedBatchId = batch.id;
+    await loadBatches();
+    await selectBatch(batch.id);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteBatch(id) {
+  if (!confirm('确定删除此批次？仅草稿或退回状态可删除。')) return;
+  try {
+    const res = await fetch(`/api/batches/${id}`, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    if (currentSelectedBatchId === id) {
+      currentSelectedBatchId = null;
+      document.getElementById('batchDetailEmpty').style.display = 'block';
+      document.getElementById('batchDetail').style.display = 'none';
+    }
+    showToast('已删除', 'success');
+    await loadBatches();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 function initEventListeners() {
   document.getElementById('addRowBtn').addEventListener('click', () => {
     addDataRow();
@@ -591,15 +1168,24 @@ function initEventListeners() {
   document.getElementById('saveDatasetBtn').addEventListener('click', saveCurrentDataset);
   document.getElementById('updateDatasetBtn').addEventListener('click', updateCurrentDataset);
   document.getElementById('datasetName').addEventListener('input', markDirty);
+  document.getElementById('createBatchBtn').addEventListener('click', () => {
+    openCreateBatchModal(currentResultId);
+  });
+  document.getElementById('newBatchFromFitBtn').addEventListener('click', () => {
+    openCreateBatchModal(currentResultId);
+  });
 }
 
 function init() {
   initCharts();
   initTabs();
+  initModuleNav();
+  initBatchFilters();
   initEventListeners();
   clearDataTable();
   loadHistory();
   loadDatasets();
+  loadMetaInfo();
   updateDatasetButtons();
 }
 
