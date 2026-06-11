@@ -992,8 +992,22 @@ async function openReviewModal(id) {
   document.getElementById('reviewReviewer').value = '复核人';
   document.getElementById('reviewComment').value = '';
   document.querySelectorAll('input[name="reviewDecision"]').forEach(r => r.checked = false);
+  updateReviewCommentRequired();
+  document.querySelectorAll('input[name="reviewDecision"]').forEach(r => {
+    r.onchange = updateReviewCommentRequired;
+  });
   window._pendingBatchId = id;
   openModal('modalReviewBatch');
+}
+
+function updateReviewCommentRequired() {
+  const decisionEl = document.querySelector('input[name="reviewDecision"]:checked');
+  const requiredStar = document.getElementById('reviewCommentRequired');
+  if (!decisionEl || decisionEl.value === 'voided') {
+    requiredStar.style.visibility = 'hidden';
+  } else {
+    requiredStar.style.visibility = 'visible';
+  }
 }
 
 async function confirmReviewBatch() {
@@ -1003,6 +1017,12 @@ async function confirmReviewBatch() {
   const comment = document.getElementById('reviewComment').value.trim();
   if (!reviewer) { showToast('请填写复核人', 'error'); return; }
   if (!decisionEl) { showToast('请选择复核决定', 'error'); return; }
+  if (decisionEl.value !== 'voided' && !comment) {
+    const hint = decisionEl.value === 'approved' ? '通过必须填写意见' : '退回必须填写意见及修改要求';
+    showToast('请填写复核意见：' + hint, 'error');
+    document.getElementById('reviewComment').focus();
+    return;
+  }
   try {
     const res = await fetch(`/api/batches/${id}/review`, {
       method: 'POST',

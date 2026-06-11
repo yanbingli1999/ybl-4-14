@@ -34,6 +34,15 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (data) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return originalJson(data);
+  };
+  next();
+});
+
 function ensureDataFiles() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -52,7 +61,10 @@ ensureDataFiles();
 
 function readJsonFile(filePath) {
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    let content = fs.readFileSync(filePath, 'utf-8');
+    if (content.charCodeAt(0) === 0xFEFF) {
+      content = content.slice(1);
+    }
     return JSON.parse(content);
   } catch (e) {
     return [];
@@ -60,7 +72,8 @@ function readJsonFile(filePath) {
 }
 
 function writeJsonFile(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  const content = JSON.stringify(data, null, 2);
+  fs.writeFileSync(filePath, content, { encoding: 'utf8' });
 }
 
 function generateId() {
@@ -494,6 +507,14 @@ app.post('/api/batches/:id/review', (req, res) => {
   if (!reviewer) {
     return res.status(400).json({ error: '请填写复核人' });
   }
+  const trimmedComment = (comment || '').trim();
+  if (decision !== BATCH_STATES.VOIDED && !trimmedComment) {
+    const requiredMsg = {
+      [BATCH_STATES.APPROVED]: '复核通过必须填写通过意见',
+      [BATCH_STATES.RETURNED]: '退回修改必须填写退回意见及修改要求'
+    };
+    return res.status(400).json({ error: requiredMsg[decision] || '请填写复核意见' });
+  }
 
   const batches = readBatches();
   const index = batches.findIndex(b => b.id === id);
@@ -514,7 +535,7 @@ app.post('/api/batches/:id/review', (req, res) => {
   batch.reviewOpinion = {
     decision,
     reviewer,
-    comment: comment || '',
+    comment: trimmedComment,
     timestamp: now
   };
 
@@ -529,7 +550,7 @@ app.post('/api/batches/:id/review', (req, res) => {
     fromState: oldState,
     timestamp: now,
     operator: reviewer,
-    comment: `${decisionLabels[decision]}：${comment || '无意见'}`
+    comment: `${decisionLabels[decision]}：${trimmedComment || '无意见'}`
   });
 
   batches[index] = batch;
